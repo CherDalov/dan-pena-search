@@ -9,8 +9,18 @@
 $ErrorActionPreference = "Stop"
 Set-Location -Path $PSScriptRoot
 
-Write-Host "==> Ingesting new videos..."
-python ingest.py --sleep 3
+# Index the most recent N videos (the channel has ~4,900; this keeps the
+# client-side index fast). Raise/remove --limit later to widen coverage.
+$LIMIT = 500
+
+Write-Host "==> Ingesting up to $LIMIT recent videos..."
+# Use cookies if present (most reliable from this machine; bypasses login throttle).
+# Resumable: if YouTube throttles, just run this script again later to continue.
+if (Test-Path "cookies.txt") {
+    python ingest.py --limit $LIMIT --sleep 3 --cookiefile cookies.txt
+} else {
+    python ingest.py --limit $LIMIT --sleep 3
+}
 
 Write-Host "==> Exporting index.json..."
 python export_index.py

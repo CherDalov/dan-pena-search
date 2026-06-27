@@ -11,9 +11,13 @@ name: Refresh search index
 # few new videos, which keeps request volume low.
 
 on:
-  schedule:
-    - cron: "0 7 * * *" # daily at 07:00 UTC
-  workflow_dispatch: {} # allow manual runs from the Actions tab
+  # Manual-only by default. CI runs from datacenter IPs, which YouTube blocks
+  # hard — so the reliable path is the LOCAL refresh.ps1 (home IP + cookies).
+  # To enable scheduled CI runs: add a YT_COOKIES (and/or YT_PROXY) repo secret,
+  # then uncomment the schedule block below.
+  # schedule:
+  #   - cron: "0 7 * * *" # daily at 07:00 UTC
+  workflow_dispatch: {} # run on demand from the Actions tab
 
 permissions:
   contents: write
@@ -51,7 +55,7 @@ jobs:
         env:
           YT_PROXY: ${{ secrets.YT_PROXY }}
         run: |
-          ARGS="--sleep 4"
+          ARGS="--limit 500 --sleep 4"
           if [ -f cookies.txt ]; then ARGS="$ARGS --cookiefile cookies.txt"; fi
           if [ -n "$YT_PROXY" ]; then ARGS="$ARGS --proxy $YT_PROXY"; fi
           echo "Running: python ingest.py $ARGS"

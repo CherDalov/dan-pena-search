@@ -4,73 +4,69 @@ A transcript search engine for the [Dan Peña YouTube channel](https://www.youtu
 modeled on [hexsearch.io](https://hexsearch.io/). Type a word or phrase and jump
 straight to the exact moment in a video where Dan said it.
 
-It works by pulling each video's YouTube caption track (which is already
-timestamped), chunking it into readable segments, and indexing those in a SQLite
-FTS5 full-text index. The web UI searches that index and deep-links into YouTube
-at the right second.
+**Live:** https://dan-pena-search.vercel.app
 
-## Setup
+## How it works
 
-```bash
-pip install -r requirements.txt
+```
+yt-dlp + captions  ──►  ingest.py  ──►  search.db (SQLite FTS5)
+                                              │
+                                       export_index.py
+                                              │
+                                              ▼
+                                  web/public/index.json
+                                              │
+                                  web/ (Vite + React)  ──►  Vercel (static)
+                                  instant client-side search (MiniSearch)
 ```
 
-## 1. Build the index
+- **`ingest.py`** lists the channel and pulls each video's timestamped YouTube
+  caption track into a SQLite FTS5 index. Resumable and throttle-aware.
+- **`export_index.py`** flattens the index into `web/public/index.json`.
+- **`web/`** is a Vite + React + Tailwind site that loads that JSON and searches
+  it entirely in the browser — exact-phrase and all-words modes, highlighted
+  quotes, timestamps, and inline playback from the matched second.
+- Hosted on **Vercel**; pushing a new `index.json` to GitHub auto-redeploys.
+
+The channel has ~4,900 videos, so by default we index the **most recent 500**
+(`--limit 500`) to keep the client-side index fast. Raise it later, or move to a
+hosted search backend (Meilisearch/Typesense) for the full catalog.
+
+## Quickstart — the website (local dev)
 
 ```bash
-python ingest.py
+cd web
+npm install
+npm run dev      # http://localhost:5173
 ```
 
-This lists every video on the channel and pulls captions for each one. It's
-**resumable** — if it stops (e.g. YouTube throttles the IP), just run it again
-and it continues where it left off. New uploads are picked up on re-runs too.
+## Populate / refresh the real data
 
-Useful flags:
+YouTube throttles caption requests by IP, and datacenter IPs (CI) are blocked
+hard — so run this **locally**, with cookies, from your normal connection.
 
-| Flag | What it does |
-|------|--------------|
-| `--limit N` | only the N most recent videos (good for a quick test) |
-| `--sleep N` | base seconds to wait between videos (politeness; default 2) |
-| `--cookies-from-browser chrome` | authenticate with your browser's YouTube cookies — **the most effective way to avoid throttling**. The browser must be **fully closed** first (Windows locks the cookie database while it's open). Works with `chrome`, `edge`, `firefox`, `brave`. |
-| `--retry-missing` | re-check videos previously found to have no captions |
+1. Export your YouTube cookies to `cookies.txt` in this folder (use the
+   "Get cookies.txt LOCALLY" browser extension while logged in). It's gitignored.
+2. Run the refresh (indexes recent 500, rebuilds the index, pushes → auto-deploy):
+   ```powershell
+   ./refresh.ps1
+   ```
+   It's **resumable** — if YouTube throttles mid-run, just run it again later and
+   it continues where it left off, then commits `web/public/index.json` so Vercel
+   redeploys with the new data.
 
-### If you get throttled (HTTP 429 / "IpBlocked")
-
-YouTube rate-limits anonymous caption requests. Two fixes:
-
-1. **Use cookies** (recommended): fully close Chrome, then
-   `python ingest.py --cookies-from-browser chrome`.
-2. **Wait and resume**: the throttle is temporary. Wait ~30–60 min and re-run
-   `python ingest.py` (optionally with a larger `--sleep 5`). Progress is saved.
-
-## 2. Run the search site
-
-```bash
-python app.py
-```
-
-Open http://127.0.0.1:5000
-
-- **Exact phrase** (default): finds where a phrase was said verbatim.
-- **All words**: matches videos containing every word, in any order.
-- Each result shows the quote with the match highlighted, a timestamp, an inline
-  play button (plays from that second), and an "open on YouTube" link.
+See [DEPLOY.md](DEPLOY.md) for hosting, scheduling, and the GitHub Action.
 
 ## Files
 
-| File | Purpose |
+| Path | Purpose |
 |------|---------|
-| `ingest.py` | scrape channel + fetch captions + build the SQLite FTS5 index |
-| `app.py` | Flask search UI |
-| `search.db` | the generated index (created by `ingest.py`) |
+| `ingest.py` | scrape channel + fetch captions → SQLite FTS5 (`--limit`, `--cookiefile`, `--proxy`) |
+| `export_index.py` | build `web/public/index.json` from the DB |
+| `refresh.ps1` | one-shot local refresh: ingest → export → commit/push |
+| `web/` | the React search site (deployed to Vercel) |
+| `vercel.json` | root build config (builds `web/` from repo root) |
+| `app.py` | optional local Flask UI over the same SQLite index |
+| `.github/workflows/refresh-index.yml` | manual GitHub Action to refresh in CI |
 
-## Notes & next steps
-
-- **Captions only** for now. A handful of videos may have no caption track (e.g.
-  brand-new premieres). To cover those, transcribe their audio with Whisper /
-  `faster-whisper` and insert the segments the same way `ingest.py` does.
-- **Keeping it fresh**: schedule `python ingest.py` (e.g. daily) to index new
-  uploads automatically.
-- **Going production**: swap SQLite FTS5 for Meilisearch/Typesense for instant,
-  typo-tolerant search-as-you-type, add paging, and deploy behind a small host.
-- Unofficial, fan-built. All playback links out to YouTube.
+Unofficial, fan-built. All playback links out to YouTube.
