@@ -1,0 +1,75 @@
+name: Refresh search index
+
+# Auto-ingest new uploads and refresh web/public/index.json.
+# Committing the updated index triggers Vercel to redeploy automatically.
+#
+# NOTE: GitHub-hosted runners use datacenter IPs, which YouTube throttles more
+# aggressively than a home connection. If runs get blocked, add either secret:
+#   YT_COOKIES  - contents of a Netscape cookies.txt exported while logged in
+#   YT_PROXY    - a residential/rotating proxy URL (http://user:pass@host:port)
+# The job runs incrementally (the DB is cached), so each run only fetches the
+# few new videos, which keeps request volume low.
+
+on:
+  schedule:
+    - cron: "0 7 * * *" # daily at 07:00 UTC
+  workflow_dispatch: {} # allow manual runs from the Actions tab
+
+permissions:
+  contents: write
+
+concurrency:
+  group: refresh-index
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Restore index database (incremental state)
+        uses: actions/cache@v4
+        with:
+          path: search.db
+          key: searchdb-${{ github.run_id }}
+          restore-keys: |
+            searchdb-
+
+      - name: Write cookies file (optional)
+        if: ${{ secrets.YT_COOKIES != '' }}
+        run: printf '%s' "${{ secrets.YT_COOKIES }}" > cookies.txt
+
+      - name: Ingest new videos
+        env:
+          YT_PROXY: ${{ secrets.YT_PROXY }}
+        run: |
+          ARGS="--sleep 4"
+          if [ -f cookies.txt ]; then ARGS="$ARGS --cookiefile cookies.txt"; fi
+          if [ -n "$YT_PROXY" ]; then ARGS="$ARGS --proxy $YT_PROXY"; fi
+          echo "Running: python ingest.py $ARGS"
+          python ingest.py $ARGS
+
+      - name: Export index.json
+        run: python export_index.py
+
+      - name: Commit updated index if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          rm -f cookies.txt
+          if ! git diff --quiet -- web/public/index.json; then
+            git add web/public/index.json
+            git commit -m "chore: refresh search index [skip ci]"
+            git push
+            echo "Index updated and pushed."
+          else
+            echo "No changes to the index."
+          fi
