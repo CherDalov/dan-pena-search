@@ -80,6 +80,9 @@ def make_ydl(args, flat: bool) -> yt_dlp.YoutubeDL:
         "skip_download": True,
         "ignoreerrors": True,
         "extractor_retries": 1,
+        # we only want captions, never video formats; don't fail when a
+        # logged-in (cookie) session reports no downloadable format.
+        "ignore_no_formats_error": True,
     }
     if flat:
         opts["extract_flat"] = True

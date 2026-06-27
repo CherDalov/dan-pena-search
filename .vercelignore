@@ -1,0 +1,17 @@
+# Never upload secrets or local artifacts to Vercel
+cookies.txt
+*cookies*.txt
+search.db
+search.db-*
+*.log
+__pycache__/
+.venv/
+venv/
+
+# Python pipeline is not part of the web build (runs locally / in CI)
+ingest.py
+export_index.py
+app.py
+refresh.ps1
+run_ingest_bg.sh
+run_cookie_ingest.sh

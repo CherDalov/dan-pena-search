@@ -11,6 +11,10 @@ search.db-*
 # logs
 *.log
 
+# auth / secrets (YouTube session cookies — never commit)
+cookies.txt
+*cookies*.txt
+
 # Node / web
 web/node_modules/
 web/dist/
@@ -22,3 +26,5 @@ web/.vite/
 # OS
 .DS_Store
 Thumbs.db
+
+.vercel
