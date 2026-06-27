@@ -35,6 +35,13 @@ def main() -> None:
     index_of = {v["id"]: i for i, v in enumerate(vids)}
     videos = [{"id": v["id"], "title": v["title"]} for v in vids]
 
+    if not videos:
+        print(
+            "No indexed videos yet (none with status='ok'). "
+            "Skipping export so existing index.json is NOT overwritten with empty data."
+        )
+        raise SystemExit(2)
+
     segments = []
     for row in conn.execute("SELECT video_id, start, text FROM segments"):
         vid = row["video_id"]
