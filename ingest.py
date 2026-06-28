@@ -38,8 +38,9 @@ MAX_SECONDS = 30
 # Preference order for caption languages.
 LANG_CANDIDATES = ["en", "en-US", "en-orig", "en-GB", "a.en"]
 
-# Backoff schedule (seconds) when YouTube throttles us.
-BACKOFF = [10, 30, 90]
+# Backoff when throttled: a single gentle retry, then stop. We deliberately
+# avoid a burst of rapid retries so we don't dig the IP deeper into a block.
+BACKOFF = [60]
 
 
 class Throttled(Exception):
@@ -235,7 +236,7 @@ def ingest(args) -> None:
         }
 
     ydl = make_ydl(args, flat=False)
-    new_ok = new_missing = 0
+    new_ok = new_missing = processed = 0
     pending = [v for v in videos if v["id"] not in done and v["id"] not in skip_missing]
     print(f"{len(pending)} videos to process "
           f"({len(done)} already indexed).\n")
@@ -282,6 +283,14 @@ def ingest(args) -> None:
             new_missing += 1
             print(f"[{i}/{len(pending)}] --  no captions  {label}")
 
+        processed += 1
+        if args.max_per_run and processed >= args.max_per_run:
+            print(
+                f"\nReached this run's cap of {args.max_per_run} videos "
+                f"(keeping request volume low). Run again later to continue."
+            )
+            break
+
     total_ok = conn.execute("SELECT COUNT(*) FROM videos WHERE status='ok'").fetchone()[0]
     total_segs = conn.execute("SELECT COUNT(*) FROM segments").fetchone()[0]
     print(
@@ -295,6 +304,8 @@ if __name__ == "__main__":
     p = argparse.ArgumentParser(description="Ingest Dan Pena videos into the search index.")
     p.add_argument("--limit", type=int, default=None, help="only the N most recent videos")
     p.add_argument("--sleep", type=float, default=2.0, help="base seconds between videos")
+    p.add_argument("--max-per-run", type=int, default=None,
+                   help="stop after processing N videos in one run (keeps request volume low)")
     p.add_argument("--cookies-from-browser", default=None,
                    help="browser to read YouTube cookies from, e.g. chrome / edge / firefox")
     p.add_argument("--cookiefile", default=None,
