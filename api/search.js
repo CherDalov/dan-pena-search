@@ -3,9 +3,12 @@
 //   GET /api/search           -> { hits: [], stats: { videos, segments } }
 import { createClient } from "@libsql/client";
 
+// strip any stray BOM/whitespace (Windows tooling can prepend a U+FEFF)
+const clean = (s) => (s || "").replace(/^﻿/, "").trim();
+
 const client = createClient({
-  url: process.env.TURSO_DATABASE_URL,
-  authToken: process.env.TURSO_AUTH_TOKEN,
+  url: clean(process.env.TURSO_DATABASE_URL),
+  authToken: clean(process.env.TURSO_AUTH_TOKEN),
 });
 
 // Turn raw user input into a safe FTS5 MATCH expression.
