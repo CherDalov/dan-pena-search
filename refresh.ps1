@@ -9,8 +9,8 @@
 
 Set-Location -Path $PSScriptRoot
 
-$LIMIT  = 500   # overall scope: the newest N videos we want to cover
-$PERRUN = 75    # videos to fetch THIS run (low, to stay under YouTube's radar)
+$LIMIT  = 5000  # overall scope: cover the whole channel (~4,900 videos)
+$PERRUN = 300   # videos to fetch THIS run (bounded so we stay under YouTube's radar)
 $SLEEP  = 12    # seconds between videos (extra-gentle pacing)
 
 Write-Host ""
@@ -25,7 +25,7 @@ if (-not (Test-Path "cookies.txt")) {
     Write-Host ""
 }
 
-Write-Host "Step 1 of 3: Downloading up to $PERRUN transcripts (gentle pace, ~20-30 min)..."
+Write-Host "Step 1 of 3: Downloading up to $PERRUN transcripts (gentle pace, ~1 hour)..."
 Write-Host "             Low and slow on purpose - so we don't get rate-limited again."
 Write-Host ""
 if (Test-Path "cookies.txt") {
