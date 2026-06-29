@@ -15,10 +15,19 @@ search.db-*
 cookies.txt
 *cookies*.txt
 
+# env / secrets (Turso credentials, etc. — never commit)
+.env
+.env.*
+!.env.example
+
 # Node / web
+node_modules/
 web/node_modules/
 web/dist/
 web/.vite/
+
+# generated locally as the Turso load source; served from Turso, not the deploy
+web/public/index.json
 
 # Vercel
 .vercel/
@@ -26,5 +35,7 @@ web/.vite/
 # OS
 .DS_Store
 Thumbs.db
+
+.vercel
 
 .vercel

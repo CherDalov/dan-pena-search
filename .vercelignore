@@ -15,3 +15,8 @@ app.py
 refresh.ps1
 run_ingest_bg.sh
 run_cookie_ingest.sh
+
+# secrets + local-only scripts (not needed in the deployment)
+.env
+.env.*
+scripts/

@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { Search, Sparkles, Loader2 } from "lucide-react";
-import { useSearchIndex } from "./lib/useSearchIndex";
-import type { Mode } from "./lib/types";
+import type { Hit, Mode } from "./lib/types";
+import { apiSearch, apiStats } from "./lib/api";
 import { ResultCard } from "./components/ResultCard";
 
 const EXAMPLES = [
@@ -25,19 +25,49 @@ function useDebounced<T>(value: T, ms: number): T {
 }
 
 export default function App() {
-  const { status, meta, search } = useSearchIndex();
   const [query, setQuery] = useState("");
   const [mode, setMode] = useState<Mode>("phrase");
+  const [hits, setHits] = useState<Hit[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [error, setError] = useState(false);
+  const [ms, setMs] = useState(0);
+  const [stats, setStats] = useState<{ videos: number; segments: number } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const debounced = useDebounced(query, 140);
+  const debounced = useDebounced(query, 200);
 
-  const { hits, ms } = useMemo(() => {
-    if (status !== "ready" || !debounced.trim()) return { hits: [], ms: 0 };
+  // footer stats (once)
+  useEffect(() => {
+    apiStats().then(setStats).catch(() => {});
+  }, []);
+
+  // run search whenever the debounced query / mode changes
+  useEffect(() => {
+    const q = debounced.trim();
+    if (!q) {
+      setHits([]);
+      setError(false);
+      setSearching(false);
+      return;
+    }
+    const ctrl = new AbortController();
+    setSearching(true);
+    setError(false);
     const t0 = performance.now();
-    const result = search(debounced, mode);
-    return { hits: result, ms: performance.now() - t0 };
-  }, [debounced, mode, status, search]);
+    apiSearch(debounced, mode, ctrl.signal)
+      .then((h) => {
+        setHits(h);
+        setMs(performance.now() - t0);
+        setSearching(false);
+      })
+      .catch((e: unknown) => {
+        if ((e as Error)?.name !== "AbortError") {
+          setError(true);
+          setSearching(false);
+        }
+      });
+    return () => ctrl.abort();
+  }, [debounced, mode]);
 
   // keyboard: "/" focuses search, Esc clears
   useEffect(() => {
@@ -92,7 +122,11 @@ export default function App() {
       <div className="sticky top-3 z-20 mt-10">
         <div className="rounded-2xl border border-white/10 bg-black/40 p-2 shadow-2xl backdrop-blur-xl">
           <div className="flex items-center gap-2">
-            <Search size={20} className="ml-3 shrink-0 text-zinc-500" />
+            {searching ? (
+              <Loader2 size={20} className="ml-3 shrink-0 animate-spin text-gold" />
+            ) : (
+              <Search size={20} className="ml-3 shrink-0 text-zinc-500" />
+            )}
             <input
               ref={inputRef}
               value={query}
@@ -139,19 +173,7 @@ export default function App() {
 
       {/* Body */}
       <main className="mt-8 flex-1">
-        {status === "loading" && (
-          <div className="flex flex-col items-center gap-3 pt-16 text-zinc-500">
-            <Loader2 className="animate-spin" /> Loading the archive…
-          </div>
-        )}
-
-        {status === "error" && (
-          <div className="pt-16 text-center text-zinc-500">
-            Couldn&rsquo;t load the search index. Try refreshing.
-          </div>
-        )}
-
-        {status === "ready" && !hasQuery && (
+        {!hasQuery && (
           <div className="pt-6 text-center">
             <p className="text-sm text-zinc-500">Try one of these:</p>
             <div className="mt-4 flex flex-wrap justify-center gap-2">
@@ -171,22 +193,26 @@ export default function App() {
           </div>
         )}
 
-        {status === "ready" && hasQuery && (
+        {hasQuery && (
           <>
             <div className="mb-4 flex items-center justify-between text-xs text-zinc-500">
               <span>
-                {hits.length === 0
-                  ? "No matches"
-                  : `${hits.length}${hits.length === 80 ? "+" : ""} result${
+                {searching
+                  ? "Searching…"
+                  : `${hits.length}${hits.length === 60 ? "+" : ""} result${
                       hits.length === 1 ? "" : "s"
-                    }`}{" "}
-                for &ldquo;<span className="text-zinc-300">{debounced}</span>
-                &rdquo;
+                    } for “`}
+                {!searching && <span className="text-zinc-300">{debounced}</span>}
+                {!searching && "”"}
               </span>
-              <span>{ms.toFixed(0)} ms</span>
+              {!searching && hits.length > 0 && <span>{ms.toFixed(0)} ms</span>}
             </div>
 
-            {hits.length === 0 ? (
+            {error ? (
+              <div className="pt-10 text-center text-zinc-500">
+                Search hiccup — try again in a moment.
+              </div>
+            ) : !searching && hits.length === 0 ? (
               <div className="pt-10 text-center text-zinc-500">
                 Nothing found. Try fewer words or switch to{" "}
                 <button
@@ -216,11 +242,10 @@ export default function App() {
 
       {/* Footer */}
       <footer className="mt-16 border-t border-white/10 pt-6 text-center text-xs text-zinc-600">
-        {meta && (
+        {stats && (
           <p>
-            {meta.sample && <span className="text-gold/80">Sample data · </span>}
-            {meta.videoCount} videos · {meta.segmentCount.toLocaleString()}{" "}
-            segments indexed
+            {stats.videos.toLocaleString()} videos ·{" "}
+            {stats.segments.toLocaleString()} segments indexed
           </p>
         )}
         <p className="mt-2">

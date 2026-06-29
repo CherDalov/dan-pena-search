@@ -1,0 +1,9 @@
+{
+  "name": "dan-pena-search",
+  "private": true,
+  "type": "module",
+  "description": "Serverless search API + data loader for the Dan Pena Search site (Turso-backed).",
+  "dependencies": {
+    "@libsql/client": "^0.17.4"
+  }
+}

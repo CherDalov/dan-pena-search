@@ -11,7 +11,7 @@ Set-Location -Path $PSScriptRoot
 
 $LIMIT  = 500   # overall scope: the newest N videos we want to cover
 $PERRUN = 75    # videos to fetch THIS run (low, to stay under YouTube's radar)
-$SLEEP  = 6     # seconds between videos (gentle pacing)
+$SLEEP  = 12    # seconds between videos (extra-gentle pacing)
 
 Write-Host ""
 Write-Host "==============================================" -ForegroundColor Yellow
@@ -25,7 +25,7 @@ if (-not (Test-Path "cookies.txt")) {
     Write-Host ""
 }
 
-Write-Host "Step 1 of 3: Downloading up to $PERRUN transcripts (gentle pace, ~10-15 min)..."
+Write-Host "Step 1 of 3: Downloading up to $PERRUN transcripts (gentle pace, ~20-30 min)..."
 Write-Host "             Low and slow on purpose - so we don't get rate-limited again."
 Write-Host ""
 if (Test-Path "cookies.txt") {
@@ -45,18 +45,18 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Write-Host ""
-Write-Host "Step 3 of 3: Publishing to the live site..."
-git add web/public/index.json
-$changed = git status --porcelain web/public/index.json
-if ($changed) {
-    git commit -m "chore: refresh search index" | Out-Null
-    git push
+Write-Host "Step 3 of 3: Publishing to the live site (Turso)..."
+if (-not (Test-Path "node_modules")) {
+    Write-Host "First-time setup: installing helper..."
+    npm install | Out-Null
+}
+node scripts/load_turso.mjs
+if ($LASTEXITCODE -eq 0) {
     Write-Host ""
-    Write-Host "DONE! This batch is live in ~1 minute:" -ForegroundColor Green
+    Write-Host "DONE! The new data is live right now:" -ForegroundColor Green
     Write-Host "   https://dan-pena-search.vercel.app" -ForegroundColor Green
     Write-Host ""
     Write-Host "Want more videos covered? Just double-click again later (after a break)." -ForegroundColor Green
 } else {
-    Write-Host ""
-    Write-Host "Nothing new this run - you've likely covered the recent batch already." -ForegroundColor Green
+    Write-Host "Publishing failed - check the messages above." -ForegroundColor Red
 }
