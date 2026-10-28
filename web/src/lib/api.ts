@@ -23,7 +23,12 @@ export async function apiSearch(
   );
   if (!res.ok) throw new Error(`search failed (${res.status})`);
   const data: SearchResponse = await res.json();
-  const terms = mode === "phrase" ? [q.trim()] : tokenize(q);
+  const terms =
+    mode === "phrase"
+      ? [q.trim()]
+      : mode === "any"
+        ? q.split("|").map((p) => p.trim()).filter((p) => p && !p.startsWith("-"))
+        : tokenize(q);
   return (data.hits || []).map((h) => ({
     id: h.id,
     title: h.title,

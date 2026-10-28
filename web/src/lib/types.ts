@@ -17,7 +17,8 @@ export interface IndexFile {
   segments: RawSegment[];
 }
 
-export type Mode = "phrase" | "all";
+// "any" (used by Themes): exact phrases separated by "|", any may match
+export type Mode = "phrase" | "all" | "any";
 
 export interface Hit {
   id: string; // youtube video id

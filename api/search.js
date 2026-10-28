@@ -1,5 +1,5 @@
 // Vercel serverless function: full-text search over the Turso FTS5 index.
-//   GET /api/search?q=<query>&mode=phrase|all
+//   GET /api/search?q=<query>&mode=phrase|all|any
 //   GET /api/search           -> { hits: [], stats: { videos, segments } }
 import { createClient } from "@libsql/client";
 
@@ -23,13 +23,25 @@ function buildMatch(query, mode) {
     if (!words.length) return null;
     return words.map((w) => `"${w}"`).join(" AND ");
   }
+  if (mode === "any") {
+    // theme lookups: exact phrases separated by "|", any of which may match;
+    // a phrase starting with "-" is excluded (e.g. "excuses|-excuse me")
+    const quote = (p) => '"' + p.replace(/"/g, '""') + '"';
+    const parts = q.split("|").map((p) => p.trim());
+    const include = parts.filter((p) => p && !p.startsWith("-")).map(quote);
+    const exclude = parts
+      .filter((p) => p.startsWith("-") && p.slice(1).trim())
+      .map((p) => quote(p.slice(1).trim()));
+    if (!include.length) return null;
+    return `(${include.join(" OR ")})` + exclude.map((x) => ` NOT ${x}`).join("");
+  }
   // exact phrase: wrap in quotes, neutralise internal quotes
   return '"' + q.replace(/"/g, '""') + '"';
 }
 
 export default async function handler(req, res) {
   const q = (req.query.q ?? "").toString();
-  const mode = req.query.mode === "all" ? "all" : "phrase";
+  const mode = ["all", "any"].includes(req.query.mode) ? req.query.mode : "phrase";
 
   try {
     if (!q.trim()) {
