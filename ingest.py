@@ -18,6 +18,12 @@ Usage:
     python ingest.py --cookies-from-browser chrome  # auth via your browser (best anti-block)
     python ingest.py --sleep 3                     # seconds between videos (politeness)
     python ingest.py --retry-missing              # retry videos previously found captionless
+
+Exit codes (refresh.ps1 uses these to keep going until the channel is done):
+    0  nothing left to process
+    2  this run's --max-per-run cap was reached; more videos remain
+    3  stopped early because YouTube is throttling this connection
+    4  could not list the channel's videos
 """
 
 import argparse
@@ -79,11 +85,15 @@ def make_ydl(args, flat: bool) -> yt_dlp.YoutubeDL:
         "quiet": True,
         "no_warnings": True,
         "skip_download": True,
-        "ignoreerrors": True,
+        # skip broken entries while listing, but let per-video errors raise so
+        # fetch_segments can tell a throttle from a genuinely captionless video
+        "ignoreerrors": flat,
         "extractor_retries": 1,
         # we only want captions, never video formats; don't fail when a
         # logged-in (cookie) session reports no downloadable format.
         "ignore_no_formats_error": True,
+        # YouTube's player needs a JavaScript runtime to solve its challenge
+        "js_runtimes": {"node": {}},
     }
     if flat:
         opts["extract_flat"] = True
@@ -100,7 +110,9 @@ def is_throttle(exc: Exception) -> bool:
     s = str(exc).lower()
     return any(
         k in s
-        for k in ("429", "too many requests", "sign in to confirm", "rate")
+        # "not a bot" is the bot check; an age gate ("sign in to confirm your
+        # age") is a per-video limit, not a throttle
+        for k in ("429", "too many requests", "not a bot", "rate limit", "rate-limit", "ratelimit")
     )
 
 
@@ -157,7 +169,12 @@ def fetch_segments(ydl: yt_dlp.YoutubeDL, vid: str) -> list[tuple[float, str]]:
 
     import json
 
-    data = json.loads(raw.decode("utf-8", "replace"))
+    try:
+        data = json.loads(raw.decode("utf-8", "replace"))
+    except ValueError as e:
+        # a blocked caption request can come back empty; retry it later
+        # rather than marking the video captionless
+        raise Throttled(f"unreadable caption response: {e}") from e
     snippets: list[tuple[float, str]] = []
     for ev in data.get("events", []):
         segs = ev.get("segs")
@@ -219,7 +236,7 @@ def store_missing(conn, v):
     conn.commit()
 
 
-def ingest(args) -> None:
+def ingest(args) -> int:
     conn = sqlite3.connect(DB_PATH)
     init_db(conn)
 
@@ -227,6 +244,10 @@ def ingest(args) -> None:
     lister = make_ydl(args, flat=True)
     videos = list_channel_videos(lister, args.limit)
     print(f"Found {len(videos)} videos.\n")
+    if not videos:
+        print("Could not list the channel's videos (YouTube or network problem). Try again later.")
+        conn.close()
+        return 4
 
     done = {r[0] for r in conn.execute("SELECT id FROM videos WHERE status='ok'")}
     skip_missing = set()
@@ -237,6 +258,7 @@ def ingest(args) -> None:
 
     ydl = make_ydl(args, flat=False)
     new_ok = new_missing = processed = 0
+    throttled = False
     pending = [v for v in videos if v["id"] not in done and v["id"] not in skip_missing]
     print(f"{len(pending)} videos to process "
           f"({len(done)} already indexed).\n")
@@ -248,29 +270,29 @@ def ingest(args) -> None:
             time.sleep(args.sleep + random.uniform(0, args.sleep))
 
         segments = None
+        reason = ""
         for attempt in range(len(BACKOFF) + 1):
             try:
                 segments = fetch_segments(ydl, v["id"])
                 break
-            except Throttled:
+            except Throttled as e:
                 if attempt < len(BACKOFF):
                     wait = BACKOFF[attempt]
-                    print(f"   ...throttled, backing off {wait}s")
+                    print(f"   ...throttled ({' '.join(str(e).split())[:70]}), backing off {wait}s")
                     time.sleep(wait)
                 else:
                     segments = "THROTTLED"
-            except NoCaptions:
+            except NoCaptions as e:
                 segments = None
+                reason = " ".join(str(e).split())
                 break
 
         if segments == "THROTTLED":
             print(
-                f"\nStill throttled by YouTube after backoff. Stopping cleanly.\n"
-                f"Progress is saved -- re-run later to continue"
-                + (" " if args.cookies_from_browser else
-                   ", ideally with --cookies-from-browser chrome to reduce blocks")
-                + "."
+                "\nStill throttled by YouTube after backoff. Stopping cleanly.\n"
+                "Progress is saved -- re-run later to continue."
             )
+            throttled = True
             break
 
         if segments:
@@ -281,7 +303,7 @@ def ingest(args) -> None:
         else:
             store_missing(conn, v)
             new_missing += 1
-            print(f"[{i}/{len(pending)}] --  no captions  {label}")
+            print(f"[{i}/{len(pending)}] --  no captions  {label}  ({reason[:80]})")
 
         processed += 1
         if args.max_per_run and processed >= args.max_per_run:
@@ -293,11 +315,16 @@ def ingest(args) -> None:
 
     total_ok = conn.execute("SELECT COUNT(*) FROM videos WHERE status='ok'").fetchone()[0]
     total_segs = conn.execute("SELECT COUNT(*) FROM segments").fetchone()[0]
+    remaining = len(pending) - processed
     print(
         f"\nThis run: +{new_ok} indexed, +{new_missing} without captions.\n"
-        f"Index now holds {total_ok} videos / {total_segs} searchable segments."
+        f"Index now holds {total_ok} videos / {total_segs} searchable segments.\n"
+        f"{remaining} videos still to go."
     )
     conn.close()
+    if throttled:
+        return 3
+    return 2 if remaining else 0
 
 
 if __name__ == "__main__":
@@ -315,6 +342,7 @@ if __name__ == "__main__":
     p.add_argument("--retry-missing", action="store_true", help="retry videos with no captions")
     args = p.parse_args()
     try:
-        ingest(args)
+        sys.exit(ingest(args))
     except KeyboardInterrupt:
         print("\nInterrupted; progress saved.", file=sys.stderr)
+        sys.exit(130)
