@@ -34,7 +34,11 @@ import time
 
 import yt_dlp
 
-CHANNEL_URL = "https://www.youtube.com/@trilliondollarman/videos"
+CHANNEL_URL = "https://www.youtube.com/@trilliondollarman"
+# Channel tabs to index, in this order: regular uploads, then past live
+# streams (the askDAN Q&As). Shorts are left out on purpose: mostly clips of
+# the longer videos. The "videos" tab must list, or the run counts as failed.
+CHANNEL_TABS = ["videos", "streams"]
 DB_PATH = "search.db"
 
 # Chunking targets: flush a segment once it reaches either limit.
@@ -107,30 +111,42 @@ def make_ydl(args, flat: bool) -> yt_dlp.YoutubeDL:
 
 
 def is_throttle(exc: Exception) -> bool:
+    """A YouTube throttle or a network hiccup: retry later, never mark missing."""
     s = str(exc).lower()
     return any(
         k in s
-        # "not a bot" is the bot check; an age gate ("sign in to confirm your
-        # age") is a per-video limit, not a throttle
-        for k in ("429", "too many requests", "not a bot", "rate limit", "rate-limit", "ratelimit")
+        for k in (
+            # "not a bot" is the bot check; an age gate ("sign in to confirm
+            # your age") is a per-video limit, not a throttle
+            "429", "too many requests", "not a bot", "rate limit", "rate-limit", "ratelimit",
+            # connection trouble (Wi-Fi drop, PC waking from sleep, ...)
+            "timed out", "getaddrinfo", "connection", "urlopen error", "remote end closed",
+            "network is unreachable", "temporary failure",
+        )
     )
 
 
 def list_channel_videos(ydl: yt_dlp.YoutubeDL, limit: int | None) -> list[dict]:
     if limit:
         ydl.params["playlistend"] = limit
-    info = ydl.extract_info(CHANNEL_URL, download=False)
-    entries = (info or {}).get("entries") or []
     out = []
-    for e in entries:
-        if e and e.get("id"):
-            out.append(
-                {
-                    "id": e["id"],
-                    "title": e.get("title") or "(untitled)",
-                    "url": e.get("url") or f"https://www.youtube.com/watch?v={e['id']}",
-                }
-            )
+    seen = set()
+    for tab in CHANNEL_TABS:
+        info = ydl.extract_info(f"{CHANNEL_URL}/{tab}", download=False)
+        entries = (info or {}).get("entries") or []
+        if tab == "videos" and not entries:
+            # a partial list would make the run look finished; report a failure
+            return []
+        for e in entries:
+            if e and e.get("id") and e["id"] not in seen:
+                seen.add(e["id"])
+                out.append(
+                    {
+                        "id": e["id"],
+                        "title": e.get("title") or "(untitled)",
+                        "url": e.get("url") or f"https://www.youtube.com/watch?v={e['id']}",
+                    }
+                )
     return out
 
 
@@ -240,7 +256,7 @@ def ingest(args) -> int:
     conn = sqlite3.connect(DB_PATH)
     init_db(conn)
 
-    print(f"Listing videos from {CHANNEL_URL} ...")
+    print(f"Listing videos from {CHANNEL_URL} ({' + '.join(CHANNEL_TABS)}) ...")
     lister = make_ydl(args, flat=True)
     videos = list_channel_videos(lister, args.limit)
     print(f"Found {len(videos)} videos.\n")
