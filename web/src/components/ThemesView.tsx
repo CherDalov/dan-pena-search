@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { motion } from "motion/react";
 import { ArrowLeft, ChevronRight, Loader2 } from "lucide-react";
 import type { Hit } from "../lib/types";
-import { apiSearch } from "../lib/api";
+import { apiTheme } from "../lib/api";
 import { THEME_GROUPS, findLook, type LookFor, type Theme } from "../lib/themes";
 import { ResultCard } from "./ResultCard";
 
@@ -112,7 +112,7 @@ function LookResults({
     const ctrl = new AbortController();
     setHits([]);
     setStatus("loading");
-    apiSearch(item.query, "any", ctrl.signal)
+    apiTheme(item, ctrl.signal)
       .then((h) => {
         setHits(h);
         setStatus("done");
@@ -121,7 +121,7 @@ function LookResults({
         if ((e as Error)?.name !== "AbortError") setStatus("error");
       });
     return () => ctrl.abort();
-  }, [item.query]);
+  }, [item]);
 
   const Icon = theme.icon;
   const others = theme.items.filter((it) => it.id !== item.id);

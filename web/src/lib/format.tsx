@@ -43,6 +43,20 @@ export function highlight(text: string, terms: string[]): ReactNode[] {
   return out;
 }
 
+/** Like highlight(), but marks the given [start, end) spans of `text`. */
+export function highlightSpans(text: string, marks: [number, number][]): ReactNode[] {
+  const out: ReactNode[] = [];
+  let last = 0;
+  marks.forEach(([a, b], key) => {
+    if (a < last) return;
+    if (a > last) out.push(text.slice(last, a));
+    out.push(<mark key={key}>{text.slice(a, b)}</mark>);
+    last = b;
+  });
+  if (last < text.length) out.push(text.slice(last));
+  return out;
+}
+
 export function youtubeWatch(id: string, start: number): string {
   return `https://www.youtube.com/watch?v=${id}&t=${Math.floor(start)}s`;
 }

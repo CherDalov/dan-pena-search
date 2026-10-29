@@ -5,6 +5,7 @@ import type { Hit } from "../lib/types";
 import {
   formatTimestamp,
   highlight,
+  highlightSpans,
   youtubeEmbed,
   youtubeThumb,
   youtubeWatch,
@@ -36,7 +37,7 @@ export function ResultCard({ hit, index }: { hit: Hit; index: number }) {
 
       <p className="mt-3 text-[15px] leading-relaxed text-zinc-300">
         <span className="text-gold/60">&ldquo;</span>
-        {highlight(hit.text, hit.terms)}
+        {hit.marks ? highlightSpans(hit.text, hit.marks) : highlight(hit.text, hit.terms)}
         <span className="text-gold/60">&rdquo;</span>
       </p>
 

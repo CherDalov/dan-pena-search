@@ -17,8 +17,7 @@ export interface IndexFile {
   segments: RawSegment[];
 }
 
-// "any" (used by Themes): exact phrases separated by "|", any may match
-export type Mode = "phrase" | "all" | "any";
+export type Mode = "phrase" | "all";
 
 export interface Hit {
   id: string; // youtube video id
@@ -26,4 +25,5 @@ export interface Hit {
   start: number; // seconds
   text: string;
   terms: string[]; // strings to highlight
+  marks?: [number, number][]; // exact spans to highlight instead (Themes)
 }

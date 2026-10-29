@@ -1,7 +1,9 @@
 // Vercel serverless function: full-text search over the Turso FTS5 index.
-//   GET /api/search?q=<query>&mode=phrase|all|any
+//   GET /api/search?q=<query>&mode=phrase|all
+//   GET /api/search?mode=theme&q=..&words=..&ignore=..&near=..   (Themes, see _theme.js)
 //   GET /api/search           -> { hits: [], stats: { videos, segments } }
 import { createClient } from "@libsql/client";
+import { CANDIDATES, SHOWN, ftsMatch, parseRules, themeCheck } from "./_theme.js";
 
 // strip any stray BOM/whitespace (Windows tooling can prepend a U+FEFF)
 const clean = (s) => (s || "").replace(/^﻿/, "").trim();
@@ -23,25 +25,44 @@ function buildMatch(query, mode) {
     if (!words.length) return null;
     return words.map((w) => `"${w}"`).join(" AND ");
   }
-  if (mode === "any") {
-    // theme lookups: exact phrases separated by "|", any of which may match;
-    // a phrase starting with "-" is excluded (e.g. "excuses|-excuse me")
-    const quote = (p) => '"' + p.replace(/"/g, '""') + '"';
-    const parts = q.split("|").map((p) => p.trim());
-    const include = parts.filter((p) => p && !p.startsWith("-")).map(quote);
-    const exclude = parts
-      .filter((p) => p.startsWith("-") && p.slice(1).trim())
-      .map((p) => quote(p.slice(1).trim()));
-    if (!include.length) return null;
-    return `(${include.join(" OR ")})` + exclude.map((x) => ` NOT ${x}`).join("");
-  }
   // exact phrase: wrap in quotes, neutralise internal quotes
   return '"' + q.replace(/"/g, '""') + '"';
 }
 
+// A Themes item: the best index matches, each with the moments right before
+// and after it (same video), so the rules can check the context.
+async function themeHits(query) {
+  const rules = parseRules(query);
+  const match = ftsMatch(rules);
+  if (!match) return [];
+  const around = (rel, op) =>
+    rules.near.length
+      ? `(SELECT ${rel}.text FROM segments ${rel} WHERE ${rel}.rowid = h.rid ${op} 1 AND ${rel}.video_id = h.video_id)`
+      : "NULL";
+  const r = await client.execute({
+    sql: `WITH h0 AS (
+            SELECT rowid AS rid, video_id, title, start, text, rank AS r
+            FROM segments WHERE segments MATCH ? ORDER BY rank LIMIT ?
+          )
+          SELECT h.video_id AS id, h.title, h.start, h.text,
+                 ${around("p", "-")} AS prev, ${around("n", "+")} AS next
+          FROM h0 h ORDER BY h.r`,
+    args: [match, CANDIDATES],
+  });
+  const check = themeCheck(rules);
+  const hits = [];
+  for (const row of r.rows) {
+    const marks = check(row);
+    if (!marks) continue;
+    hits.push({ id: row.id, title: row.title, start: Number(row.start), text: row.text, marks });
+    if (hits.length === SHOWN) break;
+  }
+  return hits;
+}
+
 export default async function handler(req, res) {
   const q = (req.query.q ?? "").toString();
-  const mode = ["all", "any"].includes(req.query.mode) ? req.query.mode : "phrase";
+  const mode = ["all", "theme"].includes(req.query.mode) ? req.query.mode : "phrase";
 
   try {
     if (!q.trim()) {
@@ -56,6 +77,12 @@ export default async function handler(req, res) {
           videos: Number(stat.rows[0].v),
         },
       });
+    }
+
+    if (mode === "theme") {
+      const hits = await themeHits(req.query);
+      res.setHeader("Cache-Control", "s-maxage=300, stale-while-revalidate=600");
+      return res.status(200).json({ hits });
     }
 
     const match = buildMatch(q, mode);
